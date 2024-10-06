@@ -9,7 +9,11 @@ FILE* finst;
 
 LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
 	if(msg == WM_CLOSE){
-		DestroyWindow(hWnd);
+		int ret = MessageBox(hWnd, "Are you sure you want to quit?", "Confirm", MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2);
+
+		if(ret == IDYES){
+			DestroyWindow(hWnd);
+		}
 	}else if(msg == WM_DESTROY){
 		PostQuitMessage(0);
 	}else{
