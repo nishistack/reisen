@@ -8,11 +8,12 @@
 #include <stdlib.h>
 #include <zlib.h>
 
-const char* REISEN_VERSION = "1.00";
+#include "../version.h"
 
 extern unsigned char sfx[];
 extern unsigned int sfx_len;
 uint32_t total;
+const char* projname;
 
 #define COMPRESS 16384
 
@@ -148,6 +149,7 @@ int main(int argc, char** argv){
 	int i;
 	const char* input = NULL;
 	const char* output = NULL;
+	projname = NULL;
 	for(i = 1; i < argc; i++){
 		if(argv[i][0] == '-'){
 			if(strcmp(argv[i], "--version") == 0 || strcmp(argv[i], "-V") == 0){
@@ -158,7 +160,9 @@ int main(int argc, char** argv){
 				return 1;
 			}
 		}else{
-			if(input == NULL){
+			if(projname == NULL){
+				projname = argv[i];
+			}else if(input == NULL){
 				input = argv[i];
 			}else if(output == NULL){
 				output = argv[i];
@@ -167,11 +171,13 @@ int main(int argc, char** argv){
 			}
 		}
 	}
-	if(input == NULL || output == NULL){
-		fprintf(stderr, "Usage: %s [options] input output\n", argv[0]);
+	if(projname == NULL || input == NULL || output == NULL){
+		fprintf(stderr, "Usage: %s [options] project_name input output\n", argv[0]);
 		return 1;
 	}else{
 		FILE* f;
+		char name[256];
+		memset(name, 0, 256);
 		printf("Creating output: %s\n", output);
 		f = prepare_file(output);
 		if(f == NULL){
@@ -185,6 +191,8 @@ int main(int argc, char** argv){
 			return 1;
 		}
 		printf("Total: %lu bytes\n", (unsigned long)total);
+		strcpy(name, projname);
+		fwrite(name, 1, 256, f);
 		for(i = 0; i < 4; i++){
 			unsigned char byt = (total & 0xff000000) >> 24;
 			total = total << 8;
