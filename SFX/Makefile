@@ -10,7 +10,7 @@ OBJS = main.o sfx.res
 all: reisen.sfx
 
 reisen.sfx: $(OBJS)
-	$(WINCC) -o $@ $(OBJS) $(WINLIBS)
+	$(WINCC) -mwindows -o $@ $(OBJS) $(WINLIBS)
 
 .c.o:
 	$(WINCC) -mwindows -I $(PWD)/zlib-include -c -o $@ $<
