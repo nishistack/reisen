@@ -1,6 +1,7 @@
 /* $Id$ */
 
 #include <windows.h>
+#include <shlobj.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -84,6 +85,8 @@ void AskQuit(HWND hWnd){
 LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
 	if(msg == WM_CLOSE){
 		AskQuit(hWnd);
+	}else if(msg == WM_CHAR){
+		if(wp == 0x1b) AskQuit(hWnd);
 	}else if(msg == WM_COMMAND){
 		int trig = LOWORD(wp);
 		int ev = HIWORD(wp);
