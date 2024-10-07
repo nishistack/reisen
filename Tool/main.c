@@ -47,7 +47,7 @@ int scan(FILE* f, const char* base, const char* pref){
 						int i;
 						unsigned char byt;
 						uint32_t written = 0;
-						printf("Adding directory %s", path);
+						printf("Adding directory %s\n", path);
 						pt = malloc(1 + strlen(pref) + 1 + strlen(d->d_name));
 						strcpy(pt, pref);
 						pt[strlen(pref)] = '/';
