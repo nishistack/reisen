@@ -76,6 +76,7 @@ int scan(FILE* f, const char* base, const char* pref){
 						free(pt);
 					}else{
 						z_stream strm;
+						struct stat s;
 						FILE* src = fopen(path, "rb");
 						unsigned char in[COMPRESS];
 						unsigned char out[COMPRESS];
@@ -84,6 +85,8 @@ int scan(FILE* f, const char* base, const char* pref){
 						uint32_t written = 0;
 						int i;
 						char* pt;
+
+						stat(path, &s);
 
 						pt = malloc(1 + strlen(pref) + 1 + strlen(d->d_name));
 						strcpy(pt, pref);
@@ -121,7 +124,7 @@ int scan(FILE* f, const char* base, const char* pref){
 							}while(strm.avail_out == 0);
 						}while(flush != Z_FINISH);
 
-						printf("done, %lu bytes\n", (unsigned long)written);
+						printf("done, %lu bytes, %d%%\n", (unsigned long)written, (int)(((double)written / s.st_size) * 100));
 
 						total += strlen(pt) + 1 + 5 + written;
 
