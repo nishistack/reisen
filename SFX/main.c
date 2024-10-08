@@ -20,6 +20,7 @@ HWND edit;
 HWND progress;
 HINSTANCE hInst;
 FILE* finst;
+char* config;
 HFONT titlefont;
 HFONT normalfont;
 HFONT versionfont;
@@ -33,6 +34,7 @@ char setupname[512];
 char welcome[512];
 
 BOOL change = FALSE;
+BOOL dirchange = TRUE;
 BOOL err;
 HWND windows[512];
 int window_count = 0;
@@ -43,6 +45,7 @@ struct entry {
 	char* name;
 	uint32_t size;
 	BOOL dir;
+	BOOL skip;
 };
 
 struct entry entries[2048];
@@ -116,7 +119,11 @@ void ExtractProc(void* arg){
 		sprintf(destpath, "%s%s", instpath, entries[i].name);
 retry:
 		fseek(finst, strlen(entries[i].name), SEEK_CUR);
-		if(entries[i].dir){
+		if(entries[i].skip){
+			fseek(finst, entries[i].size, SEEK_CUR);
+			fseek(finst, 4, SEEK_CUR);
+			fseek(finst, 1, SEEK_CUR);
+		}else if(entries[i].dir){
 			fseek(finst, 4, SEEK_CUR);
 			fseek(finst, 1, SEEK_CUR);
 			CreateDirectory(destpath, NULL);
@@ -243,7 +250,15 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
 				if(gphase == PHASE_DIR){
 					SendMessage(edit, WM_GETTEXT, MAX_PATH, (LPARAM)instpath);
 				}
-				gphase++;
+				if(gphase == PHASE_WELCOME){
+					if(dirchange){
+						gphase++;
+					}else{
+						gphase += 2;
+					}
+				}else{
+					gphase++;
+				}
 				RenderPhase(gphase, hWnd);
 				RedrawWindow(hWnd, NULL, NULL, RDW_ERASE | RDW_INVALIDATE);
 			}
@@ -409,6 +424,7 @@ int WINAPI WinMain(HINSTANCE hCurInst, HINSTANCE hPrevInst, LPSTR lpsCmdLine, in
 	uint32_t entbytes;
 	uint32_t incr;
 	BOOL first = TRUE;
+	config = NULL;
 	instpath[0] = 'C';
 	instpath[1] = ':';
 	instpath[2] = '\\';
@@ -450,7 +466,7 @@ loop:
 			entbytes |= n;
 		}
 		fflush(stdout);
-		if(attr & 1){
+		if(attr == 1){
 			fseek(finst, -4-entbytes-1, SEEK_CUR);
 			fread(&fnlen, 1, 1, finst);
 			fseek(finst, -1-fnlen, SEEK_CUR);
@@ -466,6 +482,7 @@ loop:
 			}else{
 				int i;
 				entries[counts - incr - 1].dir = FALSE;
+				entries[counts - incr - 1].skip = FALSE;
 				entries[counts - incr - 1].name = fnnam;
 				entries[counts - incr - 1].size = entbytes;
 				for(i = 0; fnnam[i] != 0; i++){
@@ -473,7 +490,7 @@ loop:
 				}
 				incr++;
 			}
-		}else{
+		}else if(attr == 0){
 			fnnam = malloc(entbytes + 1);
 			fnnam[entbytes] = 0;
 			fseek(finst, -4-entbytes, SEEK_CUR);
@@ -485,10 +502,27 @@ loop:
 				free(fnnam);
 			}else{
 				entries[counts - incr - 1].dir = TRUE;
+				entries[counts - incr - 1].skip = FALSE;
 				entries[counts - incr - 1].name = fnnam;
 				for(i = 0; fnnam[i] != 0; i++){
 					if(fnnam[i] == '/') fnnam[i] = '\\';
 				}
+				incr++;
+			}
+		}else if(attr == 2){
+			config = malloc(entbytes + 1);
+			config[entbytes] = 0;
+			fseek(finst, -4-entbytes, SEEK_CUR);
+			fread(config, 1, entbytes, finst);
+			fseek(finst, -entbytes, SEEK_CUR);
+			bytes -= entbytes + 4 + 1;
+
+			if(first){
+				free(config);
+			}else{
+				entries[counts - incr - 1].skip = TRUE;
+				entries[counts - incr - 1].size = entbytes;
+				entries[counts - incr - 1].name = "";
 				incr++;
 			}
 		}
@@ -501,6 +535,47 @@ loop:
 	if(first){
 		first = FALSE;
 		goto loop;
+	}
+
+	if(config != NULL){
+		int i;
+		int incr = 0;
+		for(i = 0;; i++){
+			if(config[i] == '\n' || config[i] == 0){
+				char oldc = config[i];
+				char* line = config + incr;
+				config[i] = 0;
+
+				if(strlen(line) > 0 && line[0] != '#'){
+					int j;
+					for(j = 0;; j++){
+						if(line[j] == ' ' || line[j] == '\t' || line[j] == 0){
+							BOOL hasarg = line[j] != 0;
+							char* arg = NULL;
+							char oldc2 = line[j];
+							line[j] = 0;
+							if(hasarg){
+								j++;
+								for(; line[j] != 0 && (line[j] == '\t' || line[j] == ' '); j++);
+								arg = line + j;
+							}
+							if(strcmp(line, "DefaultDirectory") == 0 && hasarg){
+								strcpy(instpath, arg);
+								instpath[strlen(arg)] = 0;
+							}else if(strcmp(line, "DirectoryUnchangable") == 0){
+								dirchange = FALSE;
+							}
+							line[j] = oldc2;
+							break;
+						}
+					}
+				}
+
+				config[i] = oldc;
+				incr = i + 1;
+				if(oldc == 0) break;
+			}
+		}
 	}
 
 	strcpy(setupname, name);

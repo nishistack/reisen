@@ -5,6 +5,7 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <zlib.h>
 
@@ -17,12 +18,50 @@ const char* projname;
 
 #define COMPRESS 65535
 
+int scan(FILE* f, const char* base, const char* pref);
+
 FILE* prepare_file(const char* path){
 	FILE* f = fopen(path, "wb");
 	if(f != NULL){
 		fwrite(sfx, 1, sfx_len, f);
 	}
 	return f;
+}
+
+void read_config(FILE* f, char* config){
+	int i;
+	int incr = 0;
+	for(i = 0;; i++){
+		if(config[i] == '\n' || config[i] == 0){
+			char oldc = config[i];
+			char* line = config + incr;
+			config[i] = 0;
+
+			if(strlen(line) > 0 && line[0] != '#'){
+				int j;
+				for(j = 0;; j++){
+					if(line[j] == ' ' || line[j] == '\t' || line[j] == 0){
+						bool hasarg = line[j] != 0;
+						char* arg = NULL;
+						line[j] = 0;
+						if(hasarg){
+							j++;
+							for(; line[j] != 0 && (line[j] == '\t' || line[j] == ' '); j++);
+							arg = line + j;
+						}
+						if(strcmp(line, "Include") == 0 && hasarg){
+							scan(f, arg, "");
+						}
+						break;
+					}
+				}
+			}
+
+			config[i] = oldc;
+			incr = i + 1;
+			if(oldc == 0) break;
+		}
+	}
 }
 
 int scan(FILE* f, const char* base, const char* pref){
@@ -189,11 +228,41 @@ int main(int argc, char** argv){
 			fprintf(stderr, "Failed to create one\n");
 			return 1;
 		}
-		if(scan(f, input, "") != 0){
-			fprintf(stderr, "Failed to process\n");
-			fclose(f);
-			remove(output);
-			return 1;
+		if(input[0] == '@'){
+			struct stat s;
+			if(stat(input + 1, &s) == 0){
+				uint8_t byt;
+				uint32_t written = s.st_size;
+				char* buf;
+				FILE* fin = fopen(input + 1, "r");
+				buf = malloc(s.st_size + 1);
+				buf[s.st_size] = 0;
+				fread(buf, 1, s.st_size, fin);
+				fwrite(buf, 1, s.st_size, f);
+
+				fclose(fin);
+				for(i = 0; i < 4; i++){
+					byt = (written & 0xff000000) >> 24;
+					written = written << 8;
+					fwrite(&byt, 1, 1, f);
+				}
+				byt = 2;
+				fwrite(&byt, 1, 1, f);
+				total += s.st_size + 4 + 1;
+
+				read_config(f, buf);
+			}else{
+				fprintf(stderr, "Failed to process\n");
+				remove(output);
+				return 1;
+			}
+		}else{
+			if(scan(f, input, "") != 0){
+				fprintf(stderr, "Failed to process\n");
+				fclose(f);
+				remove(output);
+				return 1;
+			}
 		}
 		printf("Total: %lu bytes\n", (unsigned long)total);
 		strcpy(name, projname);
