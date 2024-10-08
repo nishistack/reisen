@@ -32,6 +32,7 @@ uint32_t counts;
 char name[257];
 char setupname[512];
 char welcome[512];
+char* checks[512];
 
 BOOL change = FALSE;
 BOOL dirchange = TRUE;
@@ -39,6 +40,7 @@ BOOL err;
 HWND windows[512];
 int window_count = 0;
 int gphase = 0;
+int checkcount = 0;
 char instpath[MAX_PATH];
 
 struct entry {
@@ -54,6 +56,13 @@ void RenderPhase(int phase, HWND hWnd);
 
 int CALLBACK BrowseProc(HWND hWnd, UINT msg, LPARAM lp, LPARAM lp2){
 	return 0;
+}
+
+char* rs_strdup(const char* a){
+	char* str = malloc(strlen(a) + 1);
+	memcpy(str, a, strlen(a));
+	str[strlen(a)] = 0;
+	return str;
 }
 
 void InitWindowQueue(void){
@@ -136,6 +145,22 @@ retry:
 			uint32_t buflen = entries[i].size;
 			fseek(finst, 1, SEEK_CUR);
 
+			if(access(destpath, F_OK) == 0){
+				int j;
+				for(j = 0; checks[j] != NULL; j++){
+					if(strcmp(checks[j], entries[i].name) == 0){
+						char txt[MAX_PATH + 512];
+						txt[0] = 0;
+						strcat(txt, "File ");
+						strcat(txt, destpath);
+						strcat(txt, " already exists.\r\nOverwrite?");
+						int ret = MessageBox(hWnd, txt, "Confirm", MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2);
+						if(ret == IDNO){
+							goto skip;
+						}	
+					}
+				}
+			}
 			f = fopen(destpath, "wb");
 			if(f == NULL){
 				int ret = MessageBox(hWnd, "Error opening output.\r\nRetry?", "Error", MB_YESNO | MB_ICONERROR | MB_DEFBUTTON2);
@@ -168,9 +193,10 @@ retry:
 			} while(ret != Z_STREAM_END);
 			inflateEnd(&strm);
 
+			fclose(f);
+skip:
 			fseek(finst, 4, SEEK_CUR);
 			fseek(finst, 1, SEEK_CUR);
-			fclose(f);
 		}
 		SendMessage(progress, PBM_SETPOS, (WPARAM)((double)(i + 1) / counts * 100), 0);
 	}
@@ -339,6 +365,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
 			StringText(dc, rt, "It is recommended that you close all other applications before starting Setup. This will make it possible to update relevant system files without having to reboot your computer.");
 			rt.top += 15;
 			rt.top += 15;
+			rt.top += 15;
+			rt.top += 15;
 	
 			StringText(dc, rt, "Click Next to continue.");
 		}else if(gphase == PHASE_DIR){
@@ -448,6 +476,7 @@ int WINAPI WinMain(HINSTANCE hCurInst, HINSTANCE hPrevInst, LPSTR lpsCmdLine, in
 	}
 	strcat(instpath, name);
 	counts = 0;
+	checks[0] = NULL;
 loop:
 	bbytes = bytes;
 	fseek(finst, 0, SEEK_END);
@@ -564,6 +593,14 @@ loop:
 								instpath[strlen(arg)] = 0;
 							}else if(strcmp(line, "DirectoryUnchangable") == 0){
 								dirchange = FALSE;
+							}else if(strcmp(line, "CheckOverwrite") == 0 && hasarg){
+								int k;
+								checks[checkcount] = rs_strdup(arg);
+								checks[checkcount + 1] = NULL;
+								for(k = 0; checks[checkcount][k] != 0; k++){
+									if(checks[checkcount][k] == '/') checks[checkcount][k] = '\\';
+								}
+								checkcount++;
 							}
 							line[j] = oldc2;
 							break;
