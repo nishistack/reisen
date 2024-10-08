@@ -4,6 +4,7 @@
 #include <shlobj.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <string.h>
 #include <stdlib.h>
 #include <zlib.h>
 
@@ -11,8 +12,12 @@
 
 #include "../version.h"
 
+#define COMPRESS 16384
+
 #define StringText(dc,rt,str) DrawText(dc, str, -1, &rt, DT_WORDBREAK)
 
+HWND edit;
+HWND progress;
 HINSTANCE hInst;
 FILE* finst;
 HFONT titlefont;
@@ -22,13 +27,31 @@ HBRUSH graybrush;
 HBRUSH darkgraybrush;
 
 uint32_t bytes = 0;
+uint32_t counts;
 char name[257];
 char setupname[512];
 char welcome[512];
 
+BOOL change = FALSE;
+BOOL err;
 HWND windows[512];
 int window_count = 0;
-int phase = 0;
+int gphase = 0;
+char instpath[MAX_PATH];
+
+struct entry {
+	char* name;
+	uint32_t size;
+	BOOL dir;
+};
+
+struct entry entries[2048];
+
+void RenderPhase(int phase, HWND hWnd);
+
+int CALLBACK BrowseProc(HWND hWnd, UINT msg, LPARAM lp, LPARAM lp2){
+	return 0;
+}
 
 void InitWindowQueue(void){
 	int i;
@@ -40,11 +63,116 @@ void InitWindowQueue(void){
 
 enum phases {
 	PHASE_WELCOME = 0,
-	PHASE_DIR
+	PHASE_DIR,
+	PHASE_INSTALLING,
+	PHASE_INSTALLED,
+	PHASE_ERROR
 };
 
 void AddWindowQueue(HWND w){
+	SendMessage(w, WM_SETFONT, (WPARAM)normalfont, TRUE);
 	windows[window_count++] = w;
+	windows[window_count] = NULL;
+}
+
+void ExtractProc(void* arg){
+	HWND hWnd = (HWND)arg;
+	int i;
+	int incr = 0;
+	BOOL fs = TRUE;
+	char sep[MAX_PATH + 1];
+	int nsep = 0;
+	char cpath[MAX_PATH + 1];
+	cpath[0] = 0;
+	for(i = 0; instpath[i] != 0; i++){
+		if(instpath[i] == '/') instpath[i] = '\\';
+	}
+	for(i = 0;; i++){
+		if(instpath[i] == '\\' || instpath[i] == 0){
+			if(fs){
+				fs = FALSE;
+				strcat(cpath, sep);
+			}else{
+				if(nsep > 0){
+					strcat(cpath, "\\");
+					strcat(cpath, sep);
+					sep[0] = 0;
+
+					CreateDirectory(cpath, NULL);
+				}
+			}
+			nsep = 0;
+			if(instpath[i] == 0) break;
+		}else{
+			sep[nsep++] = instpath[i];
+			sep[nsep] = 0;
+		}
+	}
+	incr = 0;
+	fseek(finst, 0, SEEK_END);
+	fseek(finst, -4-256-bytes, SEEK_CUR);
+	for(i = 0; i < counts; i++){
+		char destpath[MAX_PATH];
+		sprintf(destpath, "%s%s", instpath, entries[i].name);
+retry:
+		fseek(finst, strlen(entries[i].name), SEEK_CUR);
+		if(entries[i].dir){
+			fseek(finst, 4, SEEK_CUR);
+			fseek(finst, 1, SEEK_CUR);
+			CreateDirectory(destpath, NULL);
+		}else{
+			FILE* f;
+			z_stream strm;
+			unsigned char in[COMPRESS];
+			unsigned char out[COMPRESS];
+			int ret;
+			uint32_t buflen = entries[i].size;
+			fseek(finst, 1, SEEK_CUR);
+
+			f = fopen(destpath, "wb");
+			if(f == NULL){
+				int ret = MessageBox(hWnd, "Error opening output.\r\nRetry?", "Error", MB_YESNO | MB_ICONERROR | MB_DEFBUTTON2);
+				if(ret == IDYES){
+					goto retry;
+				}else{
+					goto itsover;
+				}
+			}
+
+			strm.zalloc = Z_NULL;
+			strm.zfree = Z_NULL;
+			strm.opaque = Z_NULL;
+			strm.avail_in = 0;
+			strm.next_in = 0;
+			ret = inflateInit(&strm);
+			do {
+				strm.avail_in = fread(in, 1, buflen < COMPRESS ? buflen : COMPRESS, finst);
+				if(strm.avail_in == 0) break;
+				strm.next_in = in;
+				do {
+					int have;
+					strm.avail_out = COMPRESS;
+					strm.next_out = out;
+					inflate(&strm, Z_NO_FLUSH);
+					have = COMPRESS - strm.avail_out;
+					fwrite(out, 1, have, f);
+				}while(strm.avail_out == 0);
+			} while(ret != Z_STREAM_END);
+			inflateEnd(&strm);
+
+			fseek(finst, 4, SEEK_CUR);
+			fseek(finst, 1, SEEK_CUR);
+			fclose(f);
+		}
+		SendMessage(progress, PBM_SETPOS, (WPARAM)((double)(i + 1) / counts * 100), 0);
+	}
+	gphase = PHASE_INSTALLED;
+	change = TRUE;
+	_endthread();
+itsover:
+	gphase = PHASE_ERROR;
+	change = TRUE;
+	_endthread();
 }
 
 void RenderPhase(int phase, HWND hWnd){
@@ -53,9 +181,20 @@ void RenderPhase(int phase, HWND hWnd){
 	GetClientRect(hWnd, &rc);
 	InitWindowQueue();
 	if(phase == PHASE_WELCOME || phase == PHASE_DIR){
-		AddWindowQueue(CreateWindow("BUTTON", "Next", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, rc.right - 75 - 15 - 75 - 25, rc.bottom - 10 - 25, 75, 25, hWnd, (HMENU)GUI_SFX_NEXT, hInst, NULL));
+		AddWindowQueue(CreateWindow("BUTTON", "&Next", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, rc.right - 75 - 15 - 75 - 25, rc.bottom - 10 - 25, 75, 25, hWnd, (HMENU)GUI_SFX_NEXT, hInst, NULL));
 	}
-	AddWindowQueue(CreateWindow("BUTTON", "Cancel", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, rc.right - 75 - 15, rc.bottom - 10 - 25, 75, 25, hWnd, (HMENU)GUI_SFX_CANCEL, hInst, NULL));
+	if(phase == PHASE_DIR){
+		edit = CreateWindow("EDIT", NULL, WS_CHILD | WS_VISIBLE | WS_BORDER, rc.left + 150 + 10, rc.top + 10 + 25 + 10, rc.right - 150 - 10 * 2 - 50 - 10, 15, hWnd, (HMENU)GUI_SFX_DIREDIT, hInst, NULL);
+		SendMessage(edit, WM_SETTEXT, 0, (LPARAM)instpath);
+		AddWindowQueue(edit);
+		AddWindowQueue(CreateWindow("BUTTON", "&Browse", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, rc.right - 10 - 50, rc.top + 10 + 25 + 10, 50, 15, hWnd, (HMENU)GUI_SFX_BROWSE, hInst, NULL));
+	}else if(phase == PHASE_INSTALLING){
+		progress = CreateWindow(PROGRESS_CLASS, NULL, WS_CHILD | WS_VISIBLE | PBS_SMOOTH, rc.left + 150 + 10, rc.top + 10 + 25 + 10, rc.right - 150 - 10 * 2, 15, hWnd, (HMENU)0, hInst, NULL);
+		SendMessage(progress, PBM_SETPOS, (WPARAM)0, 0);
+		AddWindowQueue(progress);
+		_beginthread(ExtractProc, 0, hWnd);
+	}
+	AddWindowQueue(CreateWindow("BUTTON", (phase == PHASE_INSTALLED || phase == PHASE_ERROR) ? "&Exit" : "&Cancel", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON, rc.right - 75 - 15, rc.bottom - 10 - 25, 75, 25, hWnd, (HMENU)GUI_SFX_CANCEL, hInst, NULL));
 }
 
 void ShowBitmapSize(HWND hWnd, HDC hdc, const char* name, int x, int y, int w, int h) {
@@ -92,13 +231,35 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
 		int ev = HIWORD(wp);
 		if(trig == GUI_SFX_CANCEL){
 			if(ev == BN_CLICKED){
-				AskQuit(hWnd);
+				if(gphase == PHASE_ERROR || gphase == PHASE_INSTALLED){
+					DestroyWindow(hWnd);
+				}else{
+					AskQuit(hWnd);
+				}
 			}
 		}else if(trig == GUI_SFX_NEXT){
 			if(ev == BN_CLICKED){
-				phase++;
-				RenderPhase(phase, hWnd);
+				if(gphase == PHASE_DIR){
+					SendMessage(edit, WM_GETTEXT, MAX_PATH, (LPARAM)instpath);
+				}
+				gphase++;
+				RenderPhase(gphase, hWnd);
 				RedrawWindow(hWnd, NULL, NULL, RDW_ERASE | RDW_INVALIDATE);
+			}
+		}else if(trig == GUI_SFX_BROWSE){
+			if(ev == BN_CLICKED){
+				BROWSEINFO bi;
+				ITEMIDLIST* lpid;
+				memset(&bi, 0, sizeof(bi));
+				bi.hwndOwner = hWnd;
+				bi.lpfn = BrowseProc;
+				bi.ulFlags = BIF_VALIDATE;
+				bi.lpszTitle = "Select the install directory";
+				lpid = SHBrowseForFolder(&bi);
+				if(lpid != NULL){
+					SHGetPathFromIDList(lpid, instpath);
+					SendMessage(edit, WM_SETTEXT, 0, (LPARAM)instpath);
+				}
 			}
 		}
 	}else if(msg == WM_CREATE){
@@ -106,6 +267,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
 
 		GetClientRect(hWnd, &rc);
 
+		InitCommonControls();
 
 		titlefont = CreateFont(25, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, 0, 0, 0, FF_SWISS, NULL);
 		normalfont = CreateFont(15, 0, 0, 0, FW_REGULAR, FALSE, FALSE, FALSE, DEFAULT_CHARSET, 0, 0, 0, FF_SWISS, NULL);
@@ -115,6 +277,14 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
 
 		RenderPhase(PHASE_WELCOME, hWnd);
 
+		SetTimer(hWnd, 1, 10, NULL);
+
+	}else if(msg == WM_TIMER){
+		if(change){
+			change = FALSE;
+			RenderPhase(gphase, hWnd);
+			RedrawWindow(hWnd, NULL, NULL, RDW_ERASE | RDW_INVALIDATE);
+		}
 	}else if(msg == WM_DESTROY){
 		DeleteObject(titlefont);
 		DeleteObject(normalfont);
@@ -139,7 +309,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
 		SetTextColor(dc, RGB(0, 0, 0));
 		ShowBitmapSize(hWnd, dc, "INSTALLER", 0, 0, 0, 0);
 
-		if(phase == PHASE_WELCOME){
+		if(gphase == PHASE_WELCOME){
 			SelectObject(dc, titlefont);
 			StringText(dc, rt, welcome);
 			rt.top += 25;
@@ -155,9 +325,21 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
 			rt.top += 15;
 	
 			StringText(dc, rt, "Click Next to continue.");
-		}else if(phase == PHASE_DIR){
+		}else if(gphase == PHASE_DIR){
 			SelectObject(dc, titlefont);
 			StringText(dc, rt, "Select the folder to be installed in.");
+			rt.top += 25;
+		}else if(gphase == PHASE_INSTALLING){
+			SelectObject(dc, titlefont);
+			StringText(dc, rt, "Installing");
+			rt.top += 25;
+		}else if(gphase == PHASE_ERROR){
+			SelectObject(dc, titlefont);
+			StringText(dc, rt, "Error");
+			rt.top += 25;
+		}else if(gphase == PHASE_INSTALLED){
+			SelectObject(dc, titlefont);
+			StringText(dc, rt, "Installation successful");
 			rt.top += 25;
 		}
 
@@ -218,17 +400,25 @@ BOOL InitWindow(int nCmdShow) {
 int WINAPI WinMain(HINSTANCE hCurInst, HINSTANCE hPrevInst, LPSTR lpsCmdLine, int nCmdShow) {
 	char path[MAX_PATH + 1];
 	int len = GetModuleFileName(hCurInst, path, MAX_PATH);
-	FILE* f;
 	MSG msg;
 	BOOL bret;
 	uint8_t n;
 	int i;
-	phase = PHASE_WELCOME;
+	uint32_t bbytes;
+	uint32_t entbytes;
+	uint32_t incr;
+	BOOL first = TRUE;
+	instpath[0] = 'C';
+	instpath[1] = ':';
+	instpath[2] = '\\';
+	instpath[3] = 0;
+	gphase = PHASE_WELCOME;
 	hInst = hCurInst;
 	name[256] = 0;
 	path[len] = 0;
 	finst = fopen(path, "rb");
-	if(f == NULL){
+	if(finst == NULL){
+		printf("panic: cannot read %s\n", path);
 		return FALSE;
 	}
 	fseek(finst, 0, SEEK_END);
@@ -239,6 +429,79 @@ int WINAPI WinMain(HINSTANCE hCurInst, HINSTANCE hPrevInst, LPSTR lpsCmdLine, in
 		bytes <<= 8;
 		bytes |= n;
 	}
+	strcat(instpath, name);
+	counts = 0;
+loop:
+	bbytes = bytes;
+	fseek(finst, 0, SEEK_END);
+	fseek(finst, -4-256, SEEK_CUR);
+	incr = 0;
+	while(1){
+		uint8_t fnlen;
+		uint8_t attr;
+		char* fnnam;
+		fseek(finst, -1, SEEK_CUR);
+		fread(&attr, 1, 1, finst);
+		fseek(finst, -1-4, SEEK_CUR);
+		for(i = 0; i < 4; i++){
+			fread(&n, 1, 1, finst);
+			entbytes <<= 8;
+			entbytes |= n;
+		}
+		fflush(stdout);
+		if(attr & 1){
+			fseek(finst, -4-entbytes-1, SEEK_CUR);
+			fread(&fnlen, 1, 1, finst);
+			fseek(finst, -1-fnlen, SEEK_CUR);
+			fnnam = malloc(fnlen + 1);
+			fnnam[fnlen] = 0;
+			fread(fnnam, fnlen, 1, finst);
+			fseek(finst, -fnlen, SEEK_CUR);
+
+			bytes -= fnlen + 1 + entbytes + 4 + 1;
+
+			if(first){
+				free(fnnam);
+			}else{
+				int i;
+				entries[counts - incr - 1].dir = FALSE;
+				entries[counts - incr - 1].name = fnnam;
+				entries[counts - incr - 1].size = entbytes;
+				for(i = 0; fnnam[i] != 0; i++){
+					if(fnnam[i] == '/') fnnam[i] = '\\';
+				}
+				incr++;
+			}
+		}else{
+			fnnam = malloc(entbytes + 1);
+			fnnam[entbytes] = 0;
+			fseek(finst, -4-entbytes, SEEK_CUR);
+			fread(fnnam, 1, entbytes, finst);
+			fseek(finst, -entbytes, SEEK_CUR);
+			bytes -= entbytes + 4 + 1;
+
+			if(first){
+				free(fnnam);
+			}else{
+				entries[counts - incr - 1].dir = TRUE;
+				entries[counts - incr - 1].name = fnnam;
+				for(i = 0; fnnam[i] != 0; i++){
+					if(fnnam[i] == '/') fnnam[i] = '\\';
+				}
+				incr++;
+			}
+		}
+		if(first){
+			counts++;
+		}
+		if(bytes == 0) break;
+	}
+	bytes = bbytes;
+	if(first){
+		first = FALSE;
+		goto loop;
+	}
+
 	strcpy(setupname, name);
 	strcpy(setupname + strlen(name), " Setup");
 	setupname[strlen(name) + 6] = 0;

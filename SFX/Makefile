@@ -13,7 +13,7 @@ reisen.sfx: $(OBJS)
 	$(WINCC) -mwindows -o $@ $(OBJS) $(WINLIBS)
 
 .c.o:
-	$(WINCC) -mwindows -I $(PWD)/zlib-include -c -o $@ $<
+	$(WINCC) -mwindows -I $(PWD)/zlib$(BITS) -c -o $@ $<
 
 .rc.res:
 	$(WINDRES) -O coff $< $@

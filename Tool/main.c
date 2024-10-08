@@ -15,7 +15,7 @@ extern unsigned int sfx_len;
 uint32_t total;
 const char* projname;
 
-#define COMPRESS 16384
+#define COMPRESS 65535
 
 FILE* prepare_file(const char* path){
 	FILE* f = fopen(path, "wb");
@@ -54,8 +54,8 @@ int scan(FILE* f, const char* base, const char* pref){
 						strcpy(pt + strlen(pref) + 1, d->d_name);
 						pt[strlen(pref) + 1 + strlen(d->d_name)] = 0;
 
-						fwrite(pt + 1, 1, strlen(pt) - 1, f);
-						written = strlen(pt) - 1;
+						fwrite(pt, 1, strlen(pt), f);
+						written = strlen(pt);
 
 						total += 5 + written;
 
@@ -107,7 +107,9 @@ int scan(FILE* f, const char* base, const char* pref){
 						printf("Compressing %s... ", path);
 						fflush(stdout);
 
-						fwrite(pt + 1, 1, strlen(pt), f);
+						fwrite(pt, 1, strlen(pt), f);
+						byt = strlen(pt);
+						fwrite(&byt, 1, 1, f);
 
 						do{
 							strm.avail_in = fread(in, 1, COMPRESS, src);
@@ -126,7 +128,7 @@ int scan(FILE* f, const char* base, const char* pref){
 
 						printf("done, %lu bytes, %d%%\n", (unsigned long)written, (int)(((double)written / s.st_size) * 100));
 
-						total += strlen(pt) + 1 + 5 + written;
+						total += strlen(pt) + 1 + written + 4 + 1;
 
 						for(i = 0; i < 4; i++){
 							byt = (written & 0xff000000) >> 24;
