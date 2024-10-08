@@ -40,6 +40,7 @@ BOOL err;
 HWND windows[512];
 int window_count = 0;
 int gphase = 0;
+char* run;
 int checkcount = 0;
 char instpath[MAX_PATH];
 
@@ -200,6 +201,7 @@ skip:
 		}
 		SendMessage(progress, PBM_SETPOS, (WPARAM)((double)(i + 1) / counts * 100), 0);
 	}
+	if(run != NULL) system(run);
 	gphase = PHASE_INSTALLED;
 	change = TRUE;
 	_endthread();
@@ -452,6 +454,7 @@ int WINAPI WinMain(HINSTANCE hCurInst, HINSTANCE hPrevInst, LPSTR lpsCmdLine, in
 	uint32_t entbytes;
 	uint32_t incr;
 	BOOL first = TRUE;
+	run = NULL;
 	config = NULL;
 	instpath[0] = 'C';
 	instpath[1] = ':';
@@ -601,6 +604,8 @@ loop:
 									if(checks[checkcount][k] == '/') checks[checkcount][k] = '\\';
 								}
 								checkcount++;
+							}else if(strcmp(line, "Run") == 0 && hasarg){
+								run = rs_strdup(arg);
 							}
 							line[j] = oldc2;
 							break;
