@@ -157,6 +157,7 @@ retry:
 					have = COMPRESS - strm.avail_out;
 					fwrite(out, 1, have, f);
 				}while(strm.avail_out == 0);
+				buflen -= buflen < COMPRESS ? buflen : COMPRESS;
 			} while(ret != Z_STREAM_END);
 			inflateEnd(&strm);
 
