@@ -414,12 +414,12 @@ BOOL InitApp(void) {
 	wc.cbClsExtra = 0;
 	wc.cbWndExtra = 0;
 	wc.hInstance = hInst;
-	wc.hIcon = NULL;
+	wc.hIcon = LoadIcon(hInst, "REISEN");
 	wc.hCursor = LoadCursor(NULL, IDC_ARROW);
 	wc.hbrBackground = GetStockObject(WHITE_BRUSH);
 	wc.lpszMenuName = NULL;
 	wc.lpszClassName = "reisensfx";
-	wc.hIconSm = NULL;
+	wc.hIconSm = LoadIcon(hInst, "REISEN");
 	return RegisterClassEx(&wc);
 }
 

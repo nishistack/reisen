@@ -1,4 +1,4 @@
 /* $Id$ */
 
 INSTALLER BITMAP "../Binary/install.bmp"
-TEWI ICON "../Binary/reisen.ico"
+REISEN ICON "../Binary/reisen.ico"
