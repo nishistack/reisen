@@ -1,14 +1,19 @@
 # $Id$
 
+PREFIX = /usr/local
 PLATFORM = generic
 
 include Platform/$(PLATFORM).mk
 
 FLAGS = PLATFORM=$(PLATFORM) PWD=`pwd`
 
-.PHONY: all clean ./SFX ./Tool
+.PHONY: all install clean ./SFX ./Tool
 
 all: ./SFX ./Tool
+
+install: all
+	mkdir -p $(PREFIX)/bin
+	cp Tool/reisen $(PREFIX)/bin/
 
 ./SFX::
 	$(MAKE) -C $@ $(FLAGS)
