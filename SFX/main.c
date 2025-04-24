@@ -1,7 +1,9 @@
 /* $Id$ */
 
 #include <windows.h>
+#include <process.h>
 #include <shlobj.h>
+#include <io.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
@@ -146,7 +148,7 @@ retry:
 			uint32_t buflen = entries[i].size;
 			fseek(finst, 1, SEEK_CUR);
 
-			if(access(destpath, F_OK) == 0){
+			if(_access(destpath, 0) != -1){
 				int j;
 				for(j = 0; checks[j] != NULL; j++){
 					if(strcmp(checks[j], entries[i].name) == 0){
